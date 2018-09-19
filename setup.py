@@ -1,7 +1,7 @@
 from setuptools import setup, find_packages
 setup(
   name = 'pyhf',
-  version = '0.0.15',
+  version = '0.0.16',
   description = '(partial) pure python histfactory implementation',
   url = '',
   author = 'Lukas Heinrich',
@@ -42,7 +42,7 @@ setup(
        'coverage==4.0.3',  # coveralls
        'matplotlib',
        'jupyter',
-       'uproot',
+       'uproot<3',
        'papermill',
        'graphviz',
        'sphinx',
