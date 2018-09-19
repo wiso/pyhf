@@ -118,6 +118,12 @@ class _ModelConfig(object):
             self.auxdata_order.append(modifier_def['name'])
         return modifier
 
+def finalize_stats(modifier):
+    tensorlib, _ = get_backend()
+    inquad = tensorlib.sqrt(tensorlib.sum(tensorlib.power(tensorlib.astensor(modifier.uncertainties),2), axis=0))
+    totals = tensorlib.sum(modifier.nominal_counts,axis=0)
+    return tensorlib.divide(inquad,totals)
+
 class Model(object):
     def __init__(self, spec, **config_kwargs):
         self.spec = copy.deepcopy(spec) #may get modified by config
@@ -127,9 +133,31 @@ class Model(object):
         utils.validate(self.spec, self.schema)
         # build up our representation of the specification
         self.config = _ModelConfig.from_spec(self.spec,**config_kwargs)
+        self.cube, self.hm = self._make_cube()
+        from .modifiers.combined import CombinedInterpolator
+        self.combined_mods = {k:CombinedInterpolator(self,k) for k in ['normsys','histosys']}
+        self.finalized_stats = {k:finalize_stats(self.config.modifier(k)) for k,v in self.config.par_map.items() if 'staterror' in k}
+
+
+    def _make_cube(self):
+        import  numpy as np
+        nchan   = len(self.spec['channels'])
+        maxsamp = max(len(c['samples']) for c in self.spec['channels'])
+        maxbins = max(len(s['data']) for c in self.spec['channels'] for s in c['samples'])
+        cube = np.ones((nchan,maxsamp,maxbins))*np.nan
+        histoid = 0
+        histomap = {}
+        for i,c in enumerate(self.spec['channels']):
+            for j,s in enumerate(c['samples']):
+                cube[i,j,:] = s['data']
+                histomap.setdefault(c['name'],{})[s['name']] = {'id': histoid, 'index': tuple([i,j])}
+                histoid += 1
+        return cube,histomap
 
     def _mtype_results(self,mtype,pars):
         mtype_results = {}
+        if mtype in self.combined_mods.keys():
+            return self.combined_mods[mtype].apply(pars)
         for channel in self.spec['channels']:
             for sample in channel['samples']:
                 for mname in sample['modifiers_by_type'].get(mtype,[]):
@@ -141,29 +169,6 @@ class Model(object):
                                 modifier.apply(channel, sample, modpars)
                             )
         return mtype_results
-
-    def expected_sample(self, channel, sample, pars):
-        tensorlib, _ = get_backend()
-        #public API only, not efficient
-        all_modifications = self._all_modifications(pars)
-        return self._expected_sample(
-            tensorlib.astensor(sample['data']), #nominal
-            *all_modifications[channel['name']][sample['name']] #mods
-        )
-
-    def _expected_sample(self, nominal, factors, deltas):
-        tensorlib, _ = get_backend()
-        basefactor = [
-            tensorlib.sum(
-                tensorlib.stack(
-                    [nominal,tensorlib.sum(tensorlib.stack(deltas), axis=0)]),
-                axis=0)
-                if len(deltas) > 0 
-                else nominal
-        ]
-        factors += basefactor
-
-        return tensorlib.product(tensorlib.stack(tensorlib.simple_broadcast(*factors)), axis=0)
 
     def _all_modifications(self, pars):
         """
@@ -264,21 +269,24 @@ class Model(object):
         return auxdata
 
     def expected_actualdata(self, pars):
+        import numpy as np
         tensorlib, _ = get_backend()
         pars = tensorlib.astensor(pars)
         data = []
 
         all_modifications = self._all_modifications(pars)
-        for channel in self.spec['channels']:
-            sample_stack = [
-                self._expected_sample(
-                    tensorlib.astensor(sample['data']), #nominal
-                    *all_modifications[channel['name']][sample['name']] #mods
-                )
-                for sample in channel['samples']
-            ]
-            data.append(tensorlib.sum(tensorlib.stack(sample_stack),axis=0))
-        return tensorlib.concatenate(data)
+        delta_field  = np.zeros(self.cube.shape)
+        factor_field = np.ones(self.cube.shape)
+        for cname,smods in all_modifications.items():
+            for sname,(factors,deltas) in smods.items():
+                ind = self.hm[cname][sname]['index']
+                for f in factors:
+                    factor_field[ind] = factor_field[ind] * f
+                for d in deltas:
+                    delta_field[ind]  = delta_field[ind] + d
+        combined = factor_field * (delta_field + self.cube)
+        expected = [np.sum(combined[i][~np.isnan(combined[i])]) for i,c in enumerate(self.spec['channels'])]
+        return expected
 
     def expected_data(self, pars, include_auxdata=True):
         tensorlib, _ = get_backend()
@@ -290,12 +298,22 @@ class Model(object):
         expected_constraints = self.expected_auxdata(pars)
         tocat = [expected_actual] if expected_constraints is None else [expected_actual,expected_constraints]
         return tensorlib.concatenate(tocat)
+    
+    def __calculate_constraint(self,bytype):
+        tensorlib, _ = get_backend()
+        newsummands = None
+        for k,c in bytype.items():
+            c = tensorlib.astensor(c)
+            #warning, call signature depends on pdf_type (2 for pois, 3 for normal)
+            pdfval = getattr(tensorlib,k)(c[:,0],c[:,1],c[:,2])
+            constraint_term = tensorlib.log(pdfval)
+            newsummands = constraint_term if newsummands is None else tensorlib.concatenate([newsummands,constraint_term])
+        return tensorlib.sum(newsummands) if newsummands is not None else 0
 
     def constraint_logpdf(self, auxdata, pars):
         tensorlib, _ = get_backend()
-        # iterate over all constraints order doesn't matter....
         start_index = 0
-        summands = None
+        bytype = {}
         for cname in self.config.auxdata_order:
             modifier, modslice = self.config.modifier(cname), \
                 self.config.par_slice(cname)
@@ -303,9 +321,16 @@ class Model(object):
             end_index = start_index + int(modalphas.shape[0])
             thisauxdata = auxdata[start_index:end_index]
             start_index = end_index
-            constraint_term = tensorlib.log(modifier.pdf(thisauxdata, modalphas))
-            summands = constraint_term if summands is None else tensorlib.concatenate([summands,constraint_term])
-        return tensorlib.sum(summands) if summands is not None else 0
+            if modifier.pdf_type=='normal':
+                if modifier.__class__.__name__ in ['histosys','normsys']:
+                    kwargs = {'sigma': tensorlib.astensor([1])}
+                elif modifier.__class__.__name__ in ['staterror']:
+                    kwargs = {'sigma': self.finalized_stats[cname]}
+            else:
+                kwargs = {}
+            callargs = [thisauxdata,modalphas] + [kwargs['sigma'] if kwargs else []]
+            bytype.setdefault(modifier.pdf_type,[]).append(callargs)
+        return self.__calculate_constraint(bytype)
 
     def logpdf(self, pars, data):
         tensorlib, _ = get_backend()
