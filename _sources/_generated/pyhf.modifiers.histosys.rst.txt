@@ -1,0 +1,35 @@
+:github_url: https://github.com/diana-hep/pyhf/blob/master/pyhf/modifiers
+
+histosys
+========
+
+.. currentmodule:: pyhf.modifiers
+
+.. autoclass:: histosys
+   :show-inheritance:
+
+   
+   
+   .. rubric:: Attributes
+
+   
+   .. autoattribute:: histosys.is_constrained
+   .. autoattribute:: histosys.is_shared
+   .. autoattribute:: histosys.op_code
+   .. autoattribute:: histosys.pdf_type
+   
+   
+
+   
+   
+   .. rubric:: Methods
+
+   
+   .. automethod:: histosys.__init__
+   .. automethod:: histosys.add_sample
+   .. automethod:: histosys.alphas
+   .. automethod:: histosys.apply
+   .. automethod:: histosys.expected_data
+   .. automethod:: histosys.pdf
+   
+   

@@ -1,0 +1,29 @@
+:github_url: https://github.com/diana-hep/pyhf/blob/master/pyhf/pdf
+
+\_ModelConfig
+=============
+
+.. currentmodule:: pyhf.pdf
+
+.. autoclass:: _ModelConfig
+   :show-inheritance:
+
+   
+   
+   
+
+   
+   
+   .. rubric:: Methods
+
+   
+   .. automethod:: _ModelConfig.__init__
+   .. automethod:: _ModelConfig.add_or_get_modifier
+   .. automethod:: _ModelConfig.from_spec
+   .. automethod:: _ModelConfig.modifier
+   .. automethod:: _ModelConfig.par_slice
+   .. automethod:: _ModelConfig.set_poi
+   .. automethod:: _ModelConfig.suggested_bounds
+   .. automethod:: _ModelConfig.suggested_init
+   
+   

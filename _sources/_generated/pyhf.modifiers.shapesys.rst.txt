@@ -1,0 +1,35 @@
+:github_url: https://github.com/diana-hep/pyhf/blob/master/pyhf/modifiers
+
+shapesys
+========
+
+.. currentmodule:: pyhf.modifiers
+
+.. autoclass:: shapesys
+   :show-inheritance:
+
+   
+   
+   .. rubric:: Attributes
+
+   
+   .. autoattribute:: shapesys.is_constrained
+   .. autoattribute:: shapesys.is_shared
+   .. autoattribute:: shapesys.op_code
+   .. autoattribute:: shapesys.pdf_type
+   
+   
+
+   
+   
+   .. rubric:: Methods
+
+   
+   .. automethod:: shapesys.__init__
+   .. automethod:: shapesys.add_sample
+   .. automethod:: shapesys.alphas
+   .. automethod:: shapesys.apply
+   .. automethod:: shapesys.expected_data
+   .. automethod:: shapesys.pdf
+   
+   
